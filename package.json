@@ -1,0 +1,43 @@
+{
+  "name": "connect-my-agent",
+  "version": "0.1.0",
+  "description": "Safely connect a local OpenClaw agent to Bring My Agent web experiences.",
+  "type": "module",
+  "bin": {
+    "connect-my-agent": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "prepack": "npm run check && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/polisadov/connect-my-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/polisadov/connect-my-agent/issues"
+  },
+  "homepage": "https://github.com/polisadov/connect-my-agent#readme",
+  "keywords": [
+    "agent",
+    "openclaw",
+    "ai",
+    "local-first",
+    "npx"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}
