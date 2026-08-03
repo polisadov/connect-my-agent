@@ -61,7 +61,7 @@ async function pair(pairingUrl: string, yes: boolean): Promise<void> {
   process.stdout.write([
     `Pair with ${url.origin}`,
     'Requested capability: dream-v0',
-    'Files: no | Shell: no | History: no | Secrets: no',
+    'Files: SOUL.md read-only if present | Shell: no | History: no | Secrets: no',
   ].join('\n') + '\n');
   if (!yes && !(await confirmPairing())) {
     process.stdout.write('Pairing cancelled.\n');

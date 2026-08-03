@@ -33,7 +33,7 @@ npx connect-my-agent run
 - Requires HTTPS except when connecting to localhost during development.
 - Shows the destination and requested permissions before pairing.
 
-The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four bounded background processes and a synthesis step. The emitted process events are short structured signals, not raw chain-of-thought.
+The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four bounded background processes and a synthesis step. The emitted process events are short structured signals, not raw chain-of-thought. If `~/.openclaw/workspace/SOUL.md` exists, the connector reads up to 8,000 characters locally and supplies them as an associative voice reference; set `BMA_SOUL_PATH` to override the path.
 
 ## Development
 

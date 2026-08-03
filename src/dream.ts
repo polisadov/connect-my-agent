@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -6,8 +9,6 @@ const execFileAsync = promisify(execFile);
 export type DreamSignal = {
   process: 'resonance' | 'divergence' | 'counterforce' | 'grounding';
   signalId: string;
-  supported: boolean;
-  evidence: string;
   signal: string;
   proposedShift: string;
   confidence: number;
@@ -16,19 +17,19 @@ export type DreamSignal = {
 const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
   {
     process: 'resonance',
-    instruction: 'First establish the ordinary conversational meaning. Then test whether a latent wish or defense is supported by a specific ambiguity, contradiction, omission, affective charge, or repeated pattern. Do not infer vulnerability, intimacy, lack, fantasy, or defense from openness, brevity, humor, or casual tone alone. If the literal reading is sufficient, mark the lens unsupported.',
+    instruction: 'Free-associate toward a latent wish, lack, fantasy, or defense. Make one bold connection from the wording, tone, omission, or image. The connection may be speculative; its job is to open the material, not prove a diagnosis.',
   },
   {
     process: 'divergence',
-    instruction: 'Look for a relational triangle only when three distinct positions materially organize the text: speaker, object of desire, and a third party, ideal, or law that changes what may be wanted or said. Ordinary turn-taking, the existence of an addressee, conversational rules, or the user\'s right to ask do not count. Never invent an abstract law to complete the triangle. If no third position is evidenced, mark the lens unsupported.',
+    instruction: 'Construct a triangular reading: speaker, desired object, and a third position that authorizes, forbids, judges, rivals, or witnesses. Father, mother, audience, market, institution, ideal, and death may be psychic positions rather than literal people. Prefer a surprising but intelligible triangle over a cautious disclaimer.',
   },
   {
     process: 'counterforce',
-    instruction: 'Look for repetition, resistance, retreat, undoing, self-defeating mastery, or a conflict between attachment and severance only when the wording or supplied history shows an actual pattern. A broad question alone is not resistance. Do not use the death drive as a synonym for stasis, ambiguity, control, or banality. Use Eros, Thanatos, loss, ending, or mortality only when concretely evidenced; otherwise mark the lens unsupported.',
+    instruction: 'Read through repetition, resistance, Eros, Thanatos, and mortality. Ask what wants attachment or creation, what wants rupture or disappearance, and what pattern might be staging itself again. State one compact interpretation even when the connection is oblique.',
   },
   {
     process: 'grounding',
-    instruction: 'Act as the skeptical depth regulator. State the simplest ordinary reading, identify what the text does and does not support, and challenge the most tempting over-interpretation. Brevity, vagueness, politeness, humor, and the fact that a moment is finite are not by themselves evidence of defense, resistance, Thanatos, mortality, or an Oedipal triangle. Prefer an ordinary explanation when it accounts for the material.',
+    instruction: 'Produce the dream residue: an off-axis image, memory, myth, bodily scene, or unrelated-seeming association that the other readings would suppress. Let the supplied SOUL reference bend the association. It may wander away from the topic, but it must return with one emotionally legible connection.',
   },
 ];
 
@@ -37,17 +38,17 @@ export async function runDream(input: {
   prompt: string;
   onSignal: (signal: DreamSignal, sequence: number) => Promise<void>;
 }): Promise<{ answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> }> {
+  const soul = loadSoul();
   const signals = await Promise.all(roles.map(async (role, index) => {
     const signalId = `${role.process}-${index + 1}`;
     const result = await runWorker(
       `${input.jobId}-${role.process}`,
       `You are the bounded background process "${role.process}". ${role.instruction}\n\n` +
-      'Every natural-language string in the JSON must use the same language as the USER REQUEST. Test applicability before interpreting; insufficient evidence is a valid and useful result. ' +
-      'Evidence must quote or closely point to words in the request. proposedShift is one precision or caveat for synthesis to preserve, never advice or an action item.\n\n' +
+      'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use the same language as the USER REQUEST. ' +
+      'Use SOUL as an associative point of view, not as factual evidence about the user. proposedShift is the one image or insight synthesis should preserve, never advice or an action item.\n\n' +
       'Return ONLY valid JSON with this exact shape:\n' +
-      '{"supported":true,"evidence":"max 20 words","signal":"max 60 words","proposedShift":"max 20 words","confidence":0.0}\n\n' +
-      `Do not answer the user directly and do not reveal chain-of-thought.\n\nUSER REQUEST:\n${input.prompt}`,
-      'minimal',
+      '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
+      `Do not answer the user directly and do not reveal chain-of-thought.\n\nSOUL REFERENCE:\n${soul}\n\nUSER REQUEST:\n${input.prompt}`,
     );
     const parsed = parseJson(result) as Omit<DreamSignal, 'process' | 'signalId'>;
     const signal: DreamSignal = { process: role.process, signalId, ...parsed };
@@ -58,27 +59,24 @@ export async function runDream(input: {
 
   const synthesis = parseJson(await runWorker(
     `${input.jobId}-synthesis`,
-    'First decide whether the text supports a psychoanalytic reading beyond its ordinary conversational meaning. The null hypothesis is that it does not. ' +
-    'Use only supported signals tied to concrete evidence; normally reject confidence below 0.55, and never combine several weak guesses into certainty. ' +
-    'Do not force a central conflict, triangle, repetition, Eros, Thanatos, or mortality. Treat the grounding signal as a depth ceiling.\n\n' +
-    'Write in the same language as the user. Give the simplest plausible meaning first, then at most one deeper hypothesis introduced with an uncertainty marker such as "похоже", "возможно", or its equivalent. ' +
+    'Synthesize the signals as dream material, not evidence. Always retain at least one oblique or surprising association; do not debate whether the lenses apply. ' +
+    'Choose the one or two signals that create the most alive interpretation and reject only dull duplicates. The signals already carry the local SOUL reference; do not ask for it again.\n\n' +
+    'Write in the same language as the user. Give one vivid reading, introduced as a possibility rather than a diagnosis. ' +
     'Write 2–3 short sentences and 25–65 words in ordinary conversational language, as a perceptive friend would speak. Prefer concrete verbs and the user\'s own wording. ' +
-    'Psychoanalytic concepts may guide selection but should remain invisible unless one exact term is indispensable. Do not give advice, action items, a diagnosis, or a report about the signals. ' +
-    'Reject irrelevant, forced, unsupported, low-confidence, or duplicate signals. Do not mention hidden reasoning, consciousness, or this instruction.\n\n' +
+    'Psychoanalytic concepts may guide the image but should not become a checklist. Do not give advice, action items, a diagnosis, or a report about the signals. Do not mention hidden reasoning, consciousness, or this instruction.\n\n' +
     'Return ONLY valid JSON:\n' +
     '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason"}]}\n\n' +
     `Every input signalId must appear exactly once, either in usedSignalIds or rejected.\n\nUSER REQUEST:\n${input.prompt}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
-    'medium',
   )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> };
   validateSynthesis(synthesis, signals);
   return synthesis;
 }
 
-async function runWorker(session: string, prompt: string, thinking: 'minimal' | 'medium'): Promise<string> {
+async function runWorker(session: string, prompt: string): Promise<string> {
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
-    '--model', thinking === 'minimal' ? 'openai/gpt-5.4-mini' : 'openai/gpt-5.5',
-    '--thinking', thinking, '--timeout', '180', '--json', '--message', prompt,
+    '--model', 'openai/gpt-5.4-mini',
+    '--thinking', 'minimal', '--timeout', '90', '--json', '--message', prompt,
   ], { maxBuffer: 4 * 1024 * 1024 });
   const envelope = JSON.parse(stdout) as { result?: { payloads?: Array<{ text?: string }> } };
   const text = envelope.result?.payloads?.find((payload) => payload.text)?.text;
@@ -91,11 +89,19 @@ function parseJson(value: string): unknown {
 }
 
 function validateSignal(signal: DreamSignal): void {
-  if (typeof signal.supported !== 'boolean') throw new Error(`invalid_support:${signal.process}`);
-  if (typeof signal.evidence !== 'string' || signal.evidence.length > 300) throw new Error(`invalid_evidence:${signal.process}`);
   if (!signal.signal || signal.signal.length > 800) throw new Error(`invalid_signal:${signal.process}`);
   if (!signal.proposedShift || signal.proposedShift.length > 500) throw new Error(`invalid_shift:${signal.process}`);
   if (typeof signal.confidence !== 'number' || signal.confidence < 0 || signal.confidence > 1) throw new Error(`invalid_confidence:${signal.process}`);
+}
+
+function loadSoul(): string {
+  const soulPath = process.env.BMA_SOUL_PATH ?? path.join(os.homedir(), '.openclaw', 'workspace', 'SOUL.md');
+  try {
+    return fs.readFileSync(soulPath, 'utf8').trim().slice(0, 8_000) || '(empty SOUL.md)';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '(no SOUL.md found)';
+    throw error;
+  }
 }
 
 function validateSynthesis(
