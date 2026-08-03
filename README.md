@@ -16,6 +16,12 @@ To process one queued Dream job:
 npx connect-my-agent run-once
 ```
 
+To keep processing new jobs in the background:
+
+```sh
+npx connect-my-agent run
+```
+
 ## Security model
 
 - Generates an Ed25519 key pair locally.

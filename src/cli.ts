@@ -27,6 +27,7 @@ try {
   if (command === 'pair' && argument) await pair(argument, assumeYes);
   else if (command === 'poll') await pollOnce();
   else if (command === 'run-once') await runOnce();
+  else if (command === 'run') await runForever();
   else if (command === '--version' || command === '-v') process.stdout.write(`${packageVersion}\n`);
   else if (!command || command === '--help' || command === '-h') printHelp();
   else throw new Error(`Unknown command: ${command}`);
@@ -41,6 +42,7 @@ function printHelp(): void {
     '  connect-my-agent pair <one-time-url>\n' +
     '  connect-my-agent poll\n' +
     '  connect-my-agent run-once\n\n' +
+    '  connect-my-agent run\n\n' +
     'Options:\n' +
     '  -y, --yes     Confirm pairing without an interactive prompt\n' +
     '  -h, --help    Show help\n' +
@@ -115,6 +117,41 @@ async function runOnce(): Promise<void> {
   });
   await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(synthesis));
   process.stdout.write(`Dream job complete: ${job.id}\n`);
+}
+
+async function runForever(): Promise<void> {
+  process.stdout.write('Connector running; waiting for Dream jobs.\n');
+  while (true) {
+    try {
+      const ranJob = await runNextJob();
+      await delay(ranJob ? 250 : 1500);
+    } catch (error) {
+      process.stderr.write(`Worker error: ${error instanceof Error ? error.message : String(error)}\n`);
+      await delay(5000);
+    }
+  }
+}
+
+async function runNextJob(): Promise<boolean> {
+  const config = readConfig();
+  const job = await claimNextJob();
+  if (!job) return false;
+  process.stdout.write(`Running Dream job ${job.id}\n`);
+  const synthesis = await runDream({
+    jobId: job.id,
+    prompt: job.prompt,
+    onSignal: async (signal, sequence) => {
+      await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
+      process.stdout.write(`Process ready: ${signal.process}\n`);
+    },
+  });
+  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(synthesis));
+  process.stdout.write(`Dream job complete: ${job.id}\n`);
+  return true;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function postEvent(config: Config, jobId: string, sequence: number, stream: DreamSignal['process'] | 'synthesis', type: 'process' | 'final', text: string): Promise<void> {
