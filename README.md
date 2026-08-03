@@ -33,7 +33,9 @@ npx connect-my-agent run
 - Requires HTTPS except when connecting to localhost during development.
 - Shows the destination and requested permissions before pairing.
 
-The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four bounded background processes and a synthesis step. The emitted process events are short structured signals, not raw chain-of-thought. If `~/.openclaw/workspace/SOUL.md` exists, the connector reads up to 8,000 characters locally and supplies them as an associative voice reference; set `BMA_SOUL_PATH` to override the path.
+The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four bounded background processes in parallel. Each emits a short user-facing candidate, not raw chain-of-thought; local code immediately selects the candidate with the highest associative-salience score, so there is no fifth model call. If `~/.openclaw/workspace/SOUL.md` exists, the connector reads up to 8,000 characters locally and supplies them as an associative voice reference; set `BMA_SOUL_PATH` to override the path.
+
+Model routing is local and provider-agnostic. The connector honors `BMA_DREAM_MODEL` first; otherwise it prefers a working `anthropic/claude-haiku-4-5`, falls back to `openai/gpt-5.4-mini`, and finally uses the configured `dream-worker` default. Anthropic is probed once because configured credentials do not always imply organization-level model access.
 
 ## Development
 

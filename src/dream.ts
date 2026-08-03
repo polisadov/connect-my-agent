@@ -5,6 +5,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const preferredFastModels = ['anthropic/claude-haiku-4-5', 'openai/gpt-5.4-mini'] as const;
+let resolvedModel: Promise<string> | undefined;
 
 export type DreamSignal = {
   process: 'resonance' | 'divergence' | 'counterforce' | 'grounding';
@@ -45,7 +47,8 @@ export async function runDream(input: {
       `${input.jobId}-${role.process}`,
       `You are the bounded background process "${role.process}". ${role.instruction}\n\n` +
       'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use the same language as the USER REQUEST. ' +
-      'Use SOUL as an associative point of view, not as factual evidence about the user. proposedShift is the one image or insight synthesis should preserve, never advice or an action item.\n\n' +
+      'Use SOUL as an associative point of view, not as factual evidence about the user. Write signal as a self-contained, user-facing candidate interpretation: 2 short sentences, vivid ordinary language, introduced as a possibility rather than a diagnosis. ' +
+      'proposedShift is the one image the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty.\n\n' +
       'Return ONLY valid JSON with this exact shape:\n' +
       '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
       `Do not answer the user directly and do not reveal chain-of-thought.\n\nSOUL REFERENCE:\n${soul}\n\nUSER REQUEST:\n${input.prompt}`,
@@ -57,31 +60,72 @@ export async function runDream(input: {
     return signal;
   }));
 
-  const synthesis = parseJson(await runWorker(
-    `${input.jobId}-synthesis`,
-    'Synthesize the signals as dream material, not evidence. Always retain at least one oblique or surprising association; do not debate whether the lenses apply. ' +
-    'Choose the one or two signals that create the most alive interpretation and reject only dull duplicates. The signals already carry the local SOUL reference; do not ask for it again.\n\n' +
-    'Write in the same language as the user. Give one vivid reading, introduced as a possibility rather than a diagnosis. ' +
-    'Write 2–3 short sentences and 25–65 words in ordinary conversational language, as a perceptive friend would speak. Prefer concrete verbs and the user\'s own wording. ' +
-    'Psychoanalytic concepts may guide the image but should not become a checklist. Do not give advice, action items, a diagnosis, or a report about the signals. Do not mention hidden reasoning, consciousness, or this instruction.\n\n' +
-    'Return ONLY valid JSON:\n' +
-    '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason"}]}\n\n' +
-    `Every input signalId must appear exactly once, either in usedSignalIds or rejected.\n\nUSER REQUEST:\n${input.prompt}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
-  )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> };
+  const ranked = [...signals].sort((left, right) => right.confidence - left.confidence);
+  const winner = ranked[0]!;
+  const synthesis = {
+    answer: winner.signal,
+    usedSignalIds: [winner.signalId],
+    rejected: ranked.slice(1).map((signal) => ({ signalId: signal.signalId, reason: 'lower associative salience' })),
+  };
   validateSynthesis(synthesis, signals);
   return synthesis;
 }
 
 async function runWorker(session: string, prompt: string): Promise<string> {
+  const model = await dreamModel();
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
-    '--model', 'openai/gpt-5.4-mini',
+    '--model', model,
     '--thinking', 'minimal', '--timeout', '90', '--json', '--message', prompt,
   ], { maxBuffer: 4 * 1024 * 1024 });
   const envelope = JSON.parse(stdout) as { result?: { payloads?: Array<{ text?: string }> } };
   const text = envelope.result?.payloads?.find((payload) => payload.text)?.text;
   if (!text) throw new Error('dream_worker_empty_response');
   return text;
+}
+
+async function dreamModel(): Promise<string> {
+  resolvedModel ??= resolveDreamModel();
+  return resolvedModel;
+}
+
+async function resolveDreamModel(): Promise<string> {
+  const override = process.env.BMA_DREAM_MODEL?.trim();
+  if (override) {
+    process.stdout.write(`Dream model: ${override} (BMA_DREAM_MODEL)\n`);
+    return override;
+  }
+
+  const { stdout } = await execFileAsync('openclaw', ['models', '--agent', 'dream-worker', 'status', '--json']);
+  const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
+  const allowed = new Set(status.allowed ?? []);
+
+  if (allowed.has(preferredFastModels[0]) && await probeModel(preferredFastModels[0])) {
+    process.stdout.write(`Dream model: ${preferredFastModels[0]} (fast Anthropic route)\n`);
+    return preferredFastModels[0];
+  }
+  if (allowed.has(preferredFastModels[1])) {
+    process.stdout.write(`Dream model: ${preferredFastModels[1]} (fast OpenAI route)\n`);
+    return preferredFastModels[1];
+  }
+  if (status.resolvedDefault) {
+    process.stdout.write(`Dream model: ${status.resolvedDefault} (agent default)\n`);
+    return status.resolvedDefault;
+  }
+  throw new Error('No usable Dream model configured in OpenClaw');
+}
+
+async function probeModel(model: string): Promise<boolean> {
+  try {
+    await execFileAsync('openclaw', [
+      'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:model-probe-${Date.now()}`,
+      '--model', model, '--thinking', 'minimal', '--timeout', '30', '--json', '--message',
+      'Return only valid JSON: {"ok":true}',
+    ], { maxBuffer: 1024 * 1024 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseJson(value: string): unknown {
