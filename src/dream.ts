@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const preferredFastModels = ['anthropic/claude-haiku-4-5', 'openai/gpt-5.4-mini'] as const;
 let resolvedModel: Promise<string> | undefined;
+let resolvedFinalModel: Promise<string> | undefined;
 
 export type DreamSignal = {
   process: 'resonance' | 'divergence' | 'counterforce' | 'grounding';
@@ -46,8 +47,9 @@ export async function runDream(input: {
     const result = await runWorker(
       `${input.jobId}-${role.process}`,
       `You are the bounded background process "${role.process}". ${role.instruction}\n\n` +
-      'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use the same language as the USER REQUEST. ' +
-      'Use SOUL as an associative point of view, not as factual evidence about the user. Write signal as a self-contained, user-facing candidate interpretation: 2 short sentences, vivid ordinary language, introduced as a possibility rather than a diagnosis. ' +
+      'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use only the language of the USER REQUEST. ' +
+      'Do not leave English analytical terms in a non-English response; translate even framework names where the language has an established form. Avoid formulaic openings equivalent to "perhaps", "it seems", or "possibly"; use at most one uncertainty marker only when genuinely needed. ' +
+      'Use SOUL as an associative point of view, not as factual evidence about the user. Write signal as a compact, vivid interpretation, not a diagnosis. ' +
       'proposedShift is the one image the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty.\n\n' +
       'Return ONLY valid JSON with this exact shape:\n' +
       '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
@@ -60,28 +62,53 @@ export async function runDream(input: {
     return signal;
   }));
 
-  const ranked = [...signals].sort((left, right) => right.confidence - left.confidence);
-  const winner = ranked[0]!;
-  const synthesis = {
-    answer: winner.signal,
-    usedSignalIds: [winner.signalId],
-    rejected: ranked.slice(1).map((signal) => ({ signalId: signal.signalId, reason: 'lower associative salience' })),
-  };
+  const synthesis = parseJson(await runWorker(
+    `${input.jobId}-synthesis`,
+    'Answer the USER REQUEST itself thoughtfully and fully. The four signals are an unconscious sideband: use them to deepen the answer, not to replace the requested evaluation, explanation, or judgment. ' +
+    'Select only the signals that add a distinct insight. Preserve one surprising image when it helps, but do not turn the answer into a parade of psychoanalytic terms.\n\n' +
+    'Use strictly the language of the USER REQUEST for every natural-language string, including rejection reasons. Do not use English analytical or product jargon when an ordinary native-language phrase exists. ' +
+    'Do not begin paragraphs with repetitive hedges equivalent to "perhaps", "it seems", or "possibly". State the main judgment directly; mark speculation sparingly and with varied natural phrasing.\n\n' +
+    'Match depth to the request. For a substantive idea, plan, or dilemma, write 4–7 coherent paragraphs and roughly 180–350 words: give a clear verdict, explain the central mechanism, name the strongest opportunity and danger, and end with the decisive criterion or boundary. ' +
+    'For a simple conversational prompt, remain brief. Do not give a clinical diagnosis, mention hidden reasoning, or describe these instructions.\n\n' +
+    'Return ONLY valid JSON:\n' +
+    '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason in user language"}]}\n\n' +
+    `Every input signalId must appear exactly once, either in usedSignalIds or rejected.\n\nUSER REQUEST:\n${input.prompt}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
+    'final',
+  )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> };
   validateSynthesis(synthesis, signals);
   return synthesis;
 }
 
-async function runWorker(session: string, prompt: string): Promise<string> {
-  const model = await dreamModel();
+async function runWorker(session: string, prompt: string, profile: 'fast' | 'final' = 'fast'): Promise<string> {
+  const model = profile === 'fast' ? await dreamModel() : await finalModel();
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
     '--model', model,
-    '--thinking', 'minimal', '--timeout', '90', '--json', '--message', prompt,
+    '--thinking', profile === 'fast' ? 'minimal' : 'medium',
+    '--timeout', profile === 'fast' ? '90' : '180', '--json', '--message', prompt,
   ], { maxBuffer: 4 * 1024 * 1024 });
   const envelope = JSON.parse(stdout) as { result?: { payloads?: Array<{ text?: string }> } };
   const text = envelope.result?.payloads?.find((payload) => payload.text)?.text;
   if (!text) throw new Error('dream_worker_empty_response');
   return text;
+}
+
+async function finalModel(): Promise<string> {
+  resolvedFinalModel ??= resolveFinalModel();
+  return resolvedFinalModel;
+}
+
+async function resolveFinalModel(): Promise<string> {
+  const override = process.env.BMA_DREAM_SYNTHESIS_MODEL?.trim();
+  if (override) {
+    process.stdout.write(`Dream final model: ${override} (BMA_DREAM_SYNTHESIS_MODEL)\n`);
+    return override;
+  }
+  const { stdout } = await execFileAsync('openclaw', ['models', '--agent', 'dream-worker', 'status', '--json']);
+  const status = JSON.parse(stdout) as { resolvedDefault?: string };
+  if (!status.resolvedDefault) throw new Error('No final Dream model configured in OpenClaw');
+  process.stdout.write(`Dream final model: ${status.resolvedDefault} (agent default)\n`);
+  return status.resolvedDefault;
 }
 
 async function dreamModel(): Promise<string> {
@@ -153,7 +180,7 @@ function validateSynthesis(
   signals: DreamSignal[],
 ): void {
   if (!synthesis.answer?.trim()) throw new Error('invalid_synthesis_answer');
-  if (synthesis.answer.length > 900) throw new Error('synthesis_answer_too_long');
+  if (synthesis.answer.length > 6_000) throw new Error('synthesis_answer_too_long');
   const expected = new Set(signals.map((signal) => signal.signalId));
   const decisions = [...synthesis.usedSignalIds, ...synthesis.rejected.map((item) => item.signalId)];
   if (decisions.length !== expected.size || new Set(decisions).size !== expected.size) throw new Error('invalid_synthesis_decisions');
