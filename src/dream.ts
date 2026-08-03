@@ -12,10 +12,22 @@ export type DreamSignal = {
 };
 
 const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
-  { process: 'resonance', instruction: 'Surface the single most important implicit tension, assumption, or non-obvious association. Do not propose generic caution.' },
-  { process: 'divergence', instruction: 'Generate one relevant direction the obvious answer would miss. It must differ from risk analysis and implementation grounding.' },
-  { process: 'counterforce', instruction: 'Challenge the likely first answer. Name one condition that would make it shallow, false, premature, or badly prioritized.' },
-  { process: 'grounding', instruction: 'Translate the request into concrete stakes, constraints, tradeoffs, and one action. Do not add metaphors or abstract framing.' },
+  {
+    process: 'resonance',
+    instruction: 'Read for latent desire beneath the stated request. Identify the central wish, fantasy, lack, or forbidden satisfaction, and the defense that keeps it disguised. Attend to revealing substitutions, contradictions, and emotionally charged wording. Do not turn this into product advice.',
+  },
+  {
+    process: 'divergence',
+    instruction: 'Map the relational triangle organizing the material: self, desired object, and the third figure or law that authorizes, forbids, judges, or competes. Father, mother, rival, audience, institution, and ideal may be positions rather than literal people. Name the triangle only when the text supports it; do not mechanically diagnose an Oedipus complex.',
+  },
+  {
+    process: 'counterforce',
+    instruction: 'Find repetition, resistance, and self-sabotage. Ask what unwanted pattern is being recreated, what knowledge the speaker approaches and retreats from, and how the death drive may appear as stasis, undoing, compulsion, mastery, or return. Prefer one text-grounded conflict over generic pathology.',
+  },
+  {
+    process: 'grounding',
+    instruction: 'Read the conflict through Eros, Thanatos, and mortality. Identify what seeks attachment, creation, continuity, or pleasure; what seeks discharge, severance, control, disappearance, or an end; and how finitude gives the choice urgency. Keep the interpretation anchored in the user\'s actual words and state uncertainty where evidence is thin.',
+  },
 ];
 
 export async function runDream(input: {
@@ -42,8 +54,11 @@ export async function runDream(input: {
 
   const synthesis = parseJson(await runWorker(
     `${input.jobId}-synthesis`,
-    'Answer the user request using only signals that materially improve it. Reject irrelevant or semantically duplicate shifts. ' +
-    'Do not mention hidden reasoning, consciousness, or this instruction.\n\n' +
+    'Produce a concise psychoanalytic interpretation of the user\'s material using only signals that are supported by the text. ' +
+    'Organize the answer around one central unconscious conflict, not a sequence of recommendations. Distinguish latent desire from its defense; ' +
+    'show the relational triangle or law if genuinely present; and connect repetition or resistance with Eros, Thanatos, and mortality where useful. ' +
+    'Treat these as interpretive hypotheses, not clinical diagnoses or universal symbols. Avoid business-consulting language, generic self-help, and action-item endings. ' +
+    'Reject irrelevant, forced, or semantically duplicate signals. Do not mention hidden reasoning, consciousness, or this instruction.\n\n' +
     'Return ONLY valid JSON:\n' +
     '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason"}]}\n\n' +
     `Every input signalId must appear exactly once, either in usedSignalIds or rejected.\n\nUSER REQUEST:\n${input.prompt}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
