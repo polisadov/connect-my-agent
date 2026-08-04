@@ -40,6 +40,7 @@ export async function runDream(input: {
   jobId: string;
   prompt: string;
   memoryContext?: Array<{ alreadySaid: string; motifs: string[] }>;
+  conversationContext?: string[];
   onSignal: (signal: DreamSignal, sequence: number) => Promise<void>;
 }): Promise<{
   answer: string;
@@ -49,7 +50,7 @@ export async function runDream(input: {
 }> {
   const soul = loadSoul();
   const soulFragments = splitReference(soul, roles.length);
-  const memoryFragments = distributeMemory(input.memoryContext ?? [], roles.length);
+  const memoryFragments = distributeMemory(input.memoryContext ?? [], input.conversationContext ?? [], roles.length);
   const signals = await Promise.all(roles.map(async (role, index) => {
     const signalId = `${role.process}-${index + 1}`;
     const result = await runWorker(
@@ -81,7 +82,7 @@ export async function runDream(input: {
     'For a simple conversational prompt, remain brief. Do not give a clinical diagnosis, mention hidden reasoning, or describe these instructions.\n\n' +
     'Return ONLY valid JSON:\n' +
     '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason in user language"}],"localMemory":{"alreadySaid":"one compact conclusion to avoid repeating next time","motifs":["up to three short transformed motifs"]}}\n\n' +
-    `Every input signalId must appear exactly once, either in usedSignalIds or rejected. usedSignalIds may contain no more than two ids.\n\nUSER REQUEST:\n${input.prompt}\n\nPRIOR DREAM MEMORY:\n${JSON.stringify(input.memoryContext ?? [], null, 2)}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
+    `Every input signalId must appear exactly once, either in usedSignalIds or rejected. usedSignalIds may contain no more than two ids.\n\nUSER REQUEST:\n${input.prompt}\n\nPRIOR DREAM MEMORY:\n${JSON.stringify(input.memoryContext ?? [], null, 2)}\n\nRELATIONAL MEMORY FRAGMENTS:\n${JSON.stringify(input.conversationContext ?? [], null, 2)}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
     'final',
   )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }>; localMemory: { alreadySaid: string; motifs: string[] } };
   validateSynthesis(synthesis, signals);
@@ -193,9 +194,9 @@ function splitReference(reference: string, count: number): string[] {
   });
 }
 
-function distributeMemory(memory: Array<{ alreadySaid: string; motifs: string[] }>, count: number): string[] {
-  if (!memory.length) return Array.from({ length: count }, () => '(memory not used for this dream)');
-  const fragments = memory.flatMap((item) => [item.alreadySaid, ...item.motifs]).filter(Boolean);
+function distributeMemory(memory: Array<{ alreadySaid: string; motifs: string[] }>, conversation: string[], count: number): string[] {
+  const fragments = [...memory.flatMap((item) => [item.alreadySaid, ...item.motifs]), ...conversation].filter(Boolean);
+  if (!fragments.length) return Array.from({ length: count }, () => '(memory not used for this dream)');
   return Array.from({ length: count }, (_, index) => fragments[index % fragments.length] ?? '(no distinct fragment)');
 }
 

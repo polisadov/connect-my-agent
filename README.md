@@ -29,8 +29,9 @@ npx connect-my-agent run
 - Sends only the public key during one-time pairing.
 - Signs every job claim and event upload with timestamp and nonce.
 - Requests only the `dream-v0` capability.
-- Does not request access to shell, chat history, or secrets.
+- Never requests access to shell or secrets. Conversation memory is a separate optional pairing scope.
 - With explicit per-run consent, stores up to 50 compact prior Dream conclusions and motifs locally in `~/.bring-my-agent/dream-memory.json`; raw chat history is never read.
+- With `conversation-memory-read` granted during pairing and enabled for a run, selects up to four relevant fragments from local `MEMORY.md` and recent `memory/YYYY-MM-DD.md` files. Files remain local and are never uploaded wholesale; selected fragments can be sent to the locally configured model.
 - Requires HTTPS except when connecting to localhost during development.
 - Shows the destination and requested permissions before pairing.
 
@@ -38,6 +39,8 @@ The current v0 expects a restricted local OpenClaw agent named `dream-worker`. I
 
 Model routing is local and provider-agnostic. The connector honors `BMA_DREAM_MODEL` first; otherwise it prefers a working `anthropic/claude-haiku-4-5`, falls back to `openai/gpt-5.4-mini`, and finally uses the configured `dream-worker` default. Anthropic is probed once because configured credentials do not always imply organization-level model access.
 The final answer uses `BMA_DREAM_SYNTHESIS_MODEL` when set, otherwise the configured `dream-worker` default model.
+
+Override conversation-memory sources with `BMA_CONVERSATION_MEMORY_PATHS`, separated by the platform path delimiter.
 
 ## Development
 

@@ -7,6 +7,7 @@ import process from 'node:process';
 import readline from 'node:readline/promises';
 import { runDream, type DreamSignal } from './dream.js';
 import { recallDreamMemory, rememberDream } from './dream-memory.js';
+import { recallConversationMemory } from './conversation-memory.js';
 import { createNonce, generateDeviceIdentity, signRequest } from './protocol.js';
 
 type Config = {
@@ -15,6 +16,7 @@ type Config = {
   publicKey: string;
   privateKey: string;
   capability: 'dream-v0';
+  permissions: Array<'soul-read' | 'conversation-memory-read'>;
 };
 
 const packageVersion = '0.1.0';
@@ -59,10 +61,16 @@ async function pair(pairingUrl: string, yes: boolean): Promise<void> {
   const secret = new URLSearchParams(url.hash.slice(1)).get('secret');
   if (!pairingId || !secret) throw new Error('Invalid pairing URL');
 
+  const inspectResponse = await fetch(`${url.origin}/api/pairings/${pairingId}/inspect`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret }),
+  });
+  if (!inspectResponse.ok) throw new Error(`Pairing inspection failed: ${inspectResponse.status} ${await inspectResponse.text()}`);
+  const request = await inspectResponse.json() as { capability: 'dream-v0'; permissions: Config['permissions'] };
+  const conversationMemory = request.permissions.includes('conversation-memory-read');
   process.stdout.write([
     `Pair with ${url.origin}`,
-    'Requested capability: dream-v0',
-    'Files: SOUL.md read-only if present | Shell: no | History: no | Secrets: no',
+    `Requested capability: ${request.capability}`,
+    `Files: SOUL.md read-only if present | Conversation memory: ${conversationMemory ? 'read-only, selected fragments' : 'no'} | Shell: no | Secrets: no`,
   ].join('\n') + '\n');
   if (!yes && !(await confirmPairing())) {
     process.stdout.write('Pairing cancelled.\n');
@@ -76,8 +84,8 @@ async function pair(pairingUrl: string, yes: boolean): Promise<void> {
     body: JSON.stringify({ secret, publicKey: identity.publicKey }),
   });
   if (!response.ok) throw new Error(`Pairing failed: ${response.status} ${await response.text()}`);
-  const result = await response.json() as { agentId: string; capability: 'dream-v0' };
-  writeConfig({ baseUrl: url.origin, agentId: result.agentId, publicKey: identity.publicKey, privateKey: identity.privateKey, capability: result.capability });
+  const result = await response.json() as { agentId: string; capability: 'dream-v0'; permissions: Config['permissions'] };
+  writeConfig({ baseUrl: url.origin, agentId: result.agentId, publicKey: identity.publicKey, privateKey: identity.privateKey, capability: result.capability, permissions: result.permissions });
   process.stdout.write(`Paired agent ${result.agentId}; private key saved locally with mode 0600.\n`);
 }
 
@@ -95,12 +103,12 @@ async function pollOnce(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ job: await claimNextJob() }, null, 2)}\n`);
 }
 
-async function claimNextJob(): Promise<{ id: string; agentId: string; prompt: string; useDreamMemory?: boolean } | null> {
+async function claimNextJob(): Promise<{ id: string; agentId: string; prompt: string; useDreamMemory?: boolean; useConversationMemory?: boolean } | null> {
   const config = readConfig();
   const requestPath = `/api/agents/${config.agentId}/jobs/next`;
   const response = await signedFetch(config, requestPath, 'POST', '');
   if (!response.ok) throw new Error(`Poll failed: ${response.status} ${await response.text()}`);
-  return (await response.json() as { job: { id: string; agentId: string; prompt: string; useDreamMemory?: boolean } | null }).job;
+  return (await response.json() as { job: { id: string; agentId: string; prompt: string; useDreamMemory?: boolean; useConversationMemory?: boolean } | null }).job;
 }
 
 async function runOnce(): Promise<void> {
@@ -112,6 +120,7 @@ async function runOnce(): Promise<void> {
     jobId: job.id,
     prompt: job.prompt,
     memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
+    conversationContext: job.useConversationMemory && config.permissions?.includes('conversation-memory-read') ? recallConversationMemory(job.prompt) : [],
     onSignal: async (signal, sequence) => {
       await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
       process.stdout.write(`Process ready: ${signal.process}\n`);
@@ -145,6 +154,7 @@ async function runNextJob(): Promise<boolean> {
     jobId: job.id,
     prompt: job.prompt,
     memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
+    conversationContext: job.useConversationMemory && config.permissions?.includes('conversation-memory-read') ? recallConversationMemory(job.prompt) : [],
     onSignal: async (signal, sequence) => {
       await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
       process.stdout.write(`Process ready: ${signal.process}\n`);
@@ -191,5 +201,6 @@ function writeConfig(config: Config): void {
 
 function readConfig(): Config {
   if (!fs.existsSync(configPath)) throw new Error('No paired agent. Run `connect-my-agent pair <one-time-url>` first.');
-  return JSON.parse(fs.readFileSync(configPath, 'utf8')) as Config;
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Config;
+  return { ...config, permissions: config.permissions ?? ['soul-read'] };
 }
