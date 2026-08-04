@@ -29,11 +29,12 @@ npx connect-my-agent run
 - Sends only the public key during one-time pairing.
 - Signs every job claim and event upload with timestamp and nonce.
 - Requests only the `dream-v0` capability.
-- Does not request access to files, shell, history, or secrets.
+- Does not request access to shell, chat history, or secrets.
+- With explicit per-run consent, stores up to 50 compact prior Dream conclusions and motifs locally in `~/.bring-my-agent/dream-memory.json`; raw chat history is never read.
 - Requires HTTPS except when connecting to localhost during development.
 - Shows the destination and requested permissions before pairing.
 
-The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four fast bounded background processes in parallel, emitting short signals rather than raw chain-of-thought. A stronger final model then answers the actual request using those signals as an unconscious sideband. If `~/.openclaw/workspace/SOUL.md` exists, the connector reads up to 8,000 characters locally and supplies them as an associative voice reference; set `BMA_SOUL_PATH` to override the path.
+The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs four fast bounded processes — Unease, Warmth, Loss, and Echo — in parallel, emitting short signals rather than raw chain-of-thought. Each process receives a different fragment of `SOUL.md`. A stronger final model answers the request using at most two signals and one image. If the user enables Dream memory for a run, the connector retrieves compact local reminders of what prior Dreams already said so the answer can advance rather than repeat them.
 
 Model routing is local and provider-agnostic. The connector honors `BMA_DREAM_MODEL` first; otherwise it prefers a working `anthropic/claude-haiku-4-5`, falls back to `openai/gpt-5.4-mini`, and finally uses the configured `dream-worker` default. Anthropic is probed once because configured credentials do not always imply organization-level model access.
 The final answer uses `BMA_DREAM_SYNTHESIS_MODEL` when set, otherwise the configured `dream-worker` default model.

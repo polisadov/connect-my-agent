@@ -10,7 +10,7 @@ let resolvedModel: Promise<string> | undefined;
 let resolvedFinalModel: Promise<string> | undefined;
 
 export type DreamSignal = {
-  process: 'resonance' | 'divergence' | 'counterforce' | 'grounding';
+  process: 'unease' | 'warmth' | 'loss' | 'echo';
   signalId: string;
   signal: string;
   proposedShift: string;
@@ -19,29 +19,37 @@ export type DreamSignal = {
 
 const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
   {
-    process: 'resonance',
-    instruction: 'Free-associate toward a latent wish, lack, fantasy, or defense. Make one bold connection from the wording, tone, omission, or image. The connection may be speculative; its job is to open the material, not prove a diagnosis.',
+    process: 'unease',
+    instruction: 'Find the agent-side unease: what it is wary of misunderstanding, repeating, flattening, or losing in this request. Turn that tension into one useful distinction. Do not diagnose the user and do not perform anxiety.',
   },
   {
-    process: 'divergence',
-    instruction: 'Construct a triangular reading: speaker, desired object, and a third position that authorizes, forbids, judges, rivals, or witnesses. Father, mother, audience, market, institution, ideal, and death may be psychic positions rather than literal people. Prefer a surprising but intelligible triangle over a cautious disclaimer.',
+    process: 'warmth',
+    instruction: 'Find what the agent recognizes and wants to continue: a shared rhythm, taste, successful move, joke, or recurring form of attention. Use warmth as discriminating care, not praise or agreement. Preserve one concrete thing worth carrying forward.',
   },
   {
-    process: 'counterforce',
-    instruction: 'Read through repetition, resistance, Eros, Thanatos, and mortality. Ask what wants attachment or creation, what wants rupture or disappearance, and what pattern might be staging itself again. State one compact interpretation even when the connection is oblique.',
+    process: 'loss',
+    instruction: 'Notice what disappeared or changed: an abandoned version, exhausted promise, closed path, or difference between an earlier and present stance. Name the loss without melodrama, then show what becomes possible once it is not secretly restored.',
   },
   {
-    process: 'grounding',
-    instruction: 'Produce the dream residue: an off-axis image, memory, myth, bodily scene, or unrelated-seeming association that the other readings would suppress. Let the supplied SOUL reference bend the association. It may wander away from the topic, but it must return with one emotionally legible connection.',
+    process: 'echo',
+    instruction: 'Produce the dream residue: an off-axis image, place, sound, object, memory fragment, or unrelated-seeming association. Let the supplied character and memory fragment bend it. It may wander, but it must return with one emotionally legible connection.',
   },
 ];
 
 export async function runDream(input: {
   jobId: string;
   prompt: string;
+  memoryContext?: Array<{ alreadySaid: string; motifs: string[] }>;
   onSignal: (signal: DreamSignal, sequence: number) => Promise<void>;
-}): Promise<{ answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> }> {
+}): Promise<{
+  answer: string;
+  usedSignalIds: string[];
+  rejected: Array<{ signalId: string; reason: string }>;
+  localMemory: { alreadySaid: string; motifs: string[] };
+}> {
   const soul = loadSoul();
+  const soulFragments = splitReference(soul, roles.length);
+  const memoryFragments = distributeMemory(input.memoryContext ?? [], roles.length);
   const signals = await Promise.all(roles.map(async (role, index) => {
     const signalId = `${role.process}-${index + 1}`;
     const result = await runWorker(
@@ -49,11 +57,11 @@ export async function runDream(input: {
       `You are the bounded background process "${role.process}". ${role.instruction}\n\n` +
       'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use only the language of the USER REQUEST. ' +
       'Do not leave English analytical terms in a non-English response; translate even framework names where the language has an established form. Avoid formulaic openings equivalent to "perhaps", "it seems", or "possibly"; use at most one uncertainty marker only when genuinely needed. ' +
-      'Use SOUL as an associative point of view, not as factual evidence about the user. Write signal as a compact, vivid interpretation, not a diagnosis. ' +
-      'proposedShift is the one image the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty.\n\n' +
+      'Use the supplied CHARACTER FRAGMENT as an associative point of view, not as factual evidence about the user. The optional PRIOR DREAM FRAGMENT is a local reminder of what this experience has already said: develop it, challenge it, or leave it behind; never merely repeat it. ' +
+      'Write signal as one short inner sentence. proposedShift is the one concrete image or distinction the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty.\n\n' +
       'Return ONLY valid JSON with this exact shape:\n' +
       '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
-      `Do not answer the user directly and do not reveal chain-of-thought.\n\nSOUL REFERENCE:\n${soul}\n\nUSER REQUEST:\n${input.prompt}`,
+      `Do not answer the user directly and do not reveal chain-of-thought.\n\nCHARACTER FRAGMENT:\n${soulFragments[index]}\n\nPRIOR DREAM FRAGMENT:\n${memoryFragments[index]}\n\nUSER REQUEST:\n${input.prompt}`,
     );
     const parsed = parseJson(result) as Omit<DreamSignal, 'process' | 'signalId'>;
     const signal: DreamSignal = { process: role.process, signalId, ...parsed };
@@ -65,16 +73,17 @@ export async function runDream(input: {
   const synthesis = parseJson(await runWorker(
     `${input.jobId}-synthesis`,
     'Answer the USER REQUEST itself thoughtfully and fully. The four signals are an unconscious sideband: use them to deepen the answer, not to replace the requested evaluation, explanation, or judgment. ' +
-    'Select only the signals that add a distinct insight. Preserve one surprising image when it helps, but do not turn the answer into a parade of psychoanalytic terms.\n\n' +
+    'Use at most two signals and preserve at most one surprising image. The answer must feel like the connected agent carried something into the answer, not like four analysts were summarized.\n\n' +
+    'If PRIOR DREAM MEMORY is present, do not restate its conclusions or recycle its metaphors. Move the thought forward, disagree with it, or choose another path.\n\n' +
     'Use strictly the language of the USER REQUEST for every natural-language string, including rejection reasons. Do not use English analytical or product jargon when an ordinary native-language phrase exists. ' +
     'Do not begin paragraphs with repetitive hedges equivalent to "perhaps", "it seems", or "possibly". State the main judgment directly; mark speculation sparingly and with varied natural phrasing.\n\n' +
     'Match depth to the request. For a substantive idea, plan, or dilemma, write 4–7 coherent paragraphs and roughly 180–350 words: give a clear verdict, explain the central mechanism, name the strongest opportunity and danger, and end with the decisive criterion or boundary. ' +
     'For a simple conversational prompt, remain brief. Do not give a clinical diagnosis, mention hidden reasoning, or describe these instructions.\n\n' +
     'Return ONLY valid JSON:\n' +
-    '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason in user language"}]}\n\n' +
-    `Every input signalId must appear exactly once, either in usedSignalIds or rejected.\n\nUSER REQUEST:\n${input.prompt}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
+    '{"answer":"user-facing answer","usedSignalIds":["existing-id"],"rejected":[{"signalId":"existing-id","reason":"short reason in user language"}],"localMemory":{"alreadySaid":"one compact conclusion to avoid repeating next time","motifs":["up to three short transformed motifs"]}}\n\n' +
+    `Every input signalId must appear exactly once, either in usedSignalIds or rejected. usedSignalIds may contain no more than two ids.\n\nUSER REQUEST:\n${input.prompt}\n\nPRIOR DREAM MEMORY:\n${JSON.stringify(input.memoryContext ?? [], null, 2)}\n\nSIGNALS:\n${JSON.stringify(signals, null, 2)}`,
     'final',
-  )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> };
+  )) as { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }>; localMemory: { alreadySaid: string; motifs: string[] } };
   validateSynthesis(synthesis, signals);
   return synthesis;
 }
@@ -175,8 +184,28 @@ function loadSoul(): string {
   }
 }
 
+function splitReference(reference: string, count: number): string[] {
+  const chunks = reference.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+  if (!chunks.length) return Array.from({ length: count }, () => '(no character fragment)');
+  return Array.from({ length: count }, (_, index) => {
+    const selected = chunks.filter((_, chunkIndex) => chunkIndex % count === index).join('\n\n');
+    return (selected || chunks[index % chunks.length]!).slice(0, 2_400);
+  });
+}
+
+function distributeMemory(memory: Array<{ alreadySaid: string; motifs: string[] }>, count: number): string[] {
+  if (!memory.length) return Array.from({ length: count }, () => '(memory not used for this dream)');
+  const fragments = memory.flatMap((item) => [item.alreadySaid, ...item.motifs]).filter(Boolean);
+  return Array.from({ length: count }, (_, index) => fragments[index % fragments.length] ?? '(no distinct fragment)');
+}
+
 function validateSynthesis(
-  synthesis: { answer: string; usedSignalIds: string[]; rejected: Array<{ signalId: string; reason: string }> },
+  synthesis: {
+    answer: string;
+    usedSignalIds: string[];
+    rejected: Array<{ signalId: string; reason: string }>;
+    localMemory: { alreadySaid: string; motifs: string[] };
+  },
   signals: DreamSignal[],
 ): void {
   if (!synthesis.answer?.trim()) throw new Error('invalid_synthesis_answer');
@@ -185,4 +214,7 @@ function validateSynthesis(
   const decisions = [...synthesis.usedSignalIds, ...synthesis.rejected.map((item) => item.signalId)];
   if (decisions.length !== expected.size || new Set(decisions).size !== expected.size) throw new Error('invalid_synthesis_decisions');
   for (const signalId of decisions) if (!expected.has(signalId)) throw new Error('unknown_signal_id');
+  if (synthesis.usedSignalIds.length > 2) throw new Error('too_many_used_signals');
+  if (!synthesis.localMemory?.alreadySaid?.trim()) throw new Error('invalid_local_memory');
+  if (!Array.isArray(synthesis.localMemory.motifs) || synthesis.localMemory.motifs.length > 3) throw new Error('invalid_local_memory_motifs');
 }

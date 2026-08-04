@@ -6,6 +6,7 @@ import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline/promises';
 import { runDream, type DreamSignal } from './dream.js';
+import { recallDreamMemory, rememberDream } from './dream-memory.js';
 import { createNonce, generateDeviceIdentity, signRequest } from './protocol.js';
 
 type Config = {
@@ -94,12 +95,12 @@ async function pollOnce(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ job: await claimNextJob() }, null, 2)}\n`);
 }
 
-async function claimNextJob(): Promise<{ id: string; agentId: string; prompt: string } | null> {
+async function claimNextJob(): Promise<{ id: string; agentId: string; prompt: string; useDreamMemory?: boolean } | null> {
   const config = readConfig();
   const requestPath = `/api/agents/${config.agentId}/jobs/next`;
   const response = await signedFetch(config, requestPath, 'POST', '');
   if (!response.ok) throw new Error(`Poll failed: ${response.status} ${await response.text()}`);
-  return (await response.json() as { job: { id: string; agentId: string; prompt: string } | null }).job;
+  return (await response.json() as { job: { id: string; agentId: string; prompt: string; useDreamMemory?: boolean } | null }).job;
 }
 
 async function runOnce(): Promise<void> {
@@ -110,12 +111,15 @@ async function runOnce(): Promise<void> {
   const synthesis = await runDream({
     jobId: job.id,
     prompt: job.prompt,
+    memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
     onSignal: async (signal, sequence) => {
       await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
       process.stdout.write(`Process ready: ${signal.process}\n`);
     },
   });
-  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(synthesis));
+  if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
+  const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
+  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(publicSynthesis));
   process.stdout.write(`Dream job complete: ${job.id}\n`);
 }
 
@@ -140,12 +144,15 @@ async function runNextJob(): Promise<boolean> {
   const synthesis = await runDream({
     jobId: job.id,
     prompt: job.prompt,
+    memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
     onSignal: async (signal, sequence) => {
       await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
       process.stdout.write(`Process ready: ${signal.process}\n`);
     },
   });
-  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(synthesis));
+  if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
+  const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
+  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(publicSynthesis));
   process.stdout.write(`Dream job complete: ${job.id}\n`);
   return true;
 }
