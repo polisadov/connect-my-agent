@@ -128,7 +128,7 @@ async function runOnce(): Promise<void> {
   });
   if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
   const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
-  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(publicSynthesis));
+  await postEvent(config, job.id, 7, 'synthesis', 'final', JSON.stringify(publicSynthesis));
   process.stdout.write(`Dream job complete: ${job.id}\n`);
 }
 
@@ -162,7 +162,7 @@ async function runNextJob(): Promise<boolean> {
   });
   if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
   const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
-  await postEvent(config, job.id, 5, 'synthesis', 'final', JSON.stringify(publicSynthesis));
+  await postEvent(config, job.id, 7, 'synthesis', 'final', JSON.stringify(publicSynthesis));
   process.stdout.write(`Dream job complete: ${job.id}\n`);
   return true;
 }

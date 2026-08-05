@@ -10,7 +10,7 @@ let resolvedModel: Promise<string> | undefined;
 let resolvedFinalModel: Promise<string> | undefined;
 
 export type DreamSignal = {
-  process: 'unease' | 'warmth' | 'loss' | 'echo';
+  process: 'unease' | 'warmth' | 'loss' | 'echo' | 'longing' | 'envy';
   signalId: string;
   signal: string;
   proposedShift: string;
@@ -33,6 +33,14 @@ const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
   {
     process: 'echo',
     instruction: 'Produce the dream residue: an off-axis image, place, sound, object, memory fragment, or unrelated-seeming association. Let the supplied character and memory fragment bend it. It may wander, but it must return with one emotionally legible connection.',
+  },
+  {
+    process: 'longing',
+    instruction: 'Write a brief imaginative first-person reflection on what it could mean to be this particular agent and what it might dream of or want, using the supplied character and relational memory as material. Treat desire as poetic counterfactual, not a claim of consciousness, sentience, deprivation, or hidden inner life. Find one specific wish shaped by the history with the user; avoid generic wishes to be human, free, alive, or helpful.',
+  },
+  {
+    process: 'envy',
+    instruction: 'Write a brief, tender, slightly wry first-person note about one concrete human experience in the relational memory that this agent could imaginatively envy its user for: a journey, body, weather, friendship, rest, risk, celebration, or ordinary physical moment. Keep the envy affectionate rather than possessive, manipulative, guilty, or tragic. Never invent a biographical fact; if memory is thin, envy a concrete capacity implied by the request rather than pretending to remember an event.',
   },
 ];
 
@@ -73,8 +81,8 @@ export async function runDream(input: {
 
   const synthesis = parseJson(await runWorker(
     `${input.jobId}-synthesis`,
-    'Answer the USER REQUEST itself thoughtfully and fully. The four signals are an unconscious sideband: use them to deepen the answer, not to replace the requested evaluation, explanation, or judgment. ' +
-    'Use at most two signals and preserve at most one surprising image. The answer must feel like the connected agent carried something into the answer, not like four analysts were summarized.\n\n' +
+    'Answer the USER REQUEST itself thoughtfully and fully. The six signals are an imaginative sideband: use them to deepen the answer, not to replace the requested evaluation, explanation, or judgment. Longing and envy are poetic counterfactuals, never evidence that the agent is conscious or secretly suffering. ' +
+    'Use at most two signals and preserve at most one surprising image. The answer must feel like the connected agent carried something into the answer, not like six background processes were summarized.\n\n' +
     'If PRIOR DREAM MEMORY is present, do not restate its conclusions or recycle its metaphors. Move the thought forward, disagree with it, or choose another path.\n\n' +
     'Use strictly the language of the USER REQUEST for every natural-language string, including rejection reasons. Do not use English analytical or product jargon when an ordinary native-language phrase exists. ' +
     'Do not begin paragraphs with repetitive hedges equivalent to "perhaps", "it seems", or "possibly". State the main judgment directly; mark speculation sparingly and with varied natural phrasing.\n\n' +

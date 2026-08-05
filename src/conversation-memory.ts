@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const workspace = process.env.BMA_OPENCLAW_WORKSPACE ?? path.join(os.homedir(), '.openclaw', 'workspace');
 
-export function recallConversationMemory(prompt: string, limit = 4): string[] {
+export function recallConversationMemory(prompt: string, limit = 6): string[] {
   const terms = tokens(prompt);
   return memoryFiles()
     .flatMap((file) => readFragments(file))
