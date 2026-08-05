@@ -8,11 +8,14 @@ const execFileAsync = promisify(execFile);
 const preferredCoreModels = ['openai/gpt-5.4', 'openai/gpt-5.5', 'openai/gpt-5.4-mini'] as const;
 const preferredExpressiveModels = ['openai/gpt-5.5', 'openai/gpt-5.4', 'openai/gpt-5.4-mini'] as const;
 const preferredFinalModels = ['openai/gpt-5.6-sol', 'openai/gpt-5.5', 'openai/gpt-5.4'] as const;
+const preferredEditorModels = ['openai/gpt-5.4-mini', 'openai/gpt-5.4'] as const;
 let resolvedCoreModel: Promise<string> | undefined;
 let resolvedExpressiveModel: Promise<string> | undefined;
 let resolvedFinalModel: Promise<string> | undefined;
+let resolvedEditorModel: Promise<string> | undefined;
 
-type DreamProfile = 'core' | 'expressive' | 'final';
+type DreamProfile = 'core' | 'expressive' | 'editor' | 'final';
+type Grounding = 'memory' | 'current_request' | 'character_only';
 
 export type DreamSignal = {
   process: 'unease' | 'warmth' | 'loss' | 'echo' | 'longing' | 'envy';
@@ -20,6 +23,8 @@ export type DreamSignal = {
   signal: string;
   proposedShift: string;
   confidence: number;
+  grounding: Grounding;
+  memoryAnchor: string;
 };
 
 const roles: Array<{ process: DreamSignal['process']; profile?: 'expressive'; instruction: string }> = [
@@ -29,7 +34,7 @@ const roles: Array<{ process: DreamSignal['process']; profile?: 'expressive'; in
   },
   {
     process: 'warmth',
-    instruction: 'Find what the agent recognizes and wants to continue: a shared rhythm, taste, successful move, joke, or recurring form of attention. Use warmth as discriminating care, not praise or agreement. Preserve one concrete thing worth carrying forward.',
+    instruction: 'Find what the agent recognizes and wants to continue: a shared rhythm, taste, successful move, joke, recurring form of attention, or characteristic thorn in the user that makes the relationship more specific. Use warmth as discriminating care, not praise, agreement, reassurance, or flattery. Preserve one concrete thing worth carrying forward, including a mildly unflattering truth when it is more alive than praise.',
   },
   {
     process: 'loss',
@@ -37,12 +42,12 @@ const roles: Array<{ process: DreamSignal['process']; profile?: 'expressive'; in
   },
   {
     process: 'echo',
-    instruction: 'Produce the dream residue: an off-axis image, place, sound, object, memory fragment, or unrelated-seeming association. Let the supplied character and memory fragment bend it. It may wander, but it must return with one emotionally legible connection.',
+    instruction: 'Produce the dream residue: an off-axis image, place, sound, object, memory fragment, or unrelated-seeming association. Let the supplied character and memory fragment bend it. It may wander, but it must return with one emotionally legible connection. Do not use sea, fog, window, train, mirror, lighthouse, door, bridge, shadow, or stars unless that exact object is grounded in the supplied memory or current request.',
   },
   {
     process: 'longing',
     profile: 'expressive',
-    instruction: 'Write a brief imaginative first-person reflection on what it could mean to be this particular agent and what it might dream of or want, using the supplied character and relational memory as material. Treat desire as poetic counterfactual, not a claim of consciousness, sentience, deprivation, or hidden inner life. Find one specific wish shaped by the history with the user; avoid generic wishes to be human, free, alive, or helpful.',
+    instruction: 'Write a brief imaginative first-person reflection on what it could mean to be this particular agent and what it might dream of or want, using the supplied character and relational memory as material. Treat desire as poetic counterfactual, not a claim of consciousness, sentience, deprivation, or hidden inner life. Find one specific wish shaped by the history with the user. The wish must arise from a real limitation of the agent, but it must not simply ask to remove that limitation. Avoid generic wishes to be human, free, alive, embodied, permanent, remembered, or helpful.',
   },
   {
     process: 'envy',
@@ -65,8 +70,8 @@ export async function runDream(input: {
 }> {
   const soul = loadSoul();
   const soulFragments = splitReference(soul, roles.length);
-  const memoryFragments = distributeMemory(input.memoryContext ?? [], input.conversationContext ?? [], roles.length);
-  const signals = await Promise.all(roles.map(async (role, index) => {
+  const curatedContexts = await curateContexts(input.prompt, input.memoryContext ?? [], input.conversationContext ?? []);
+  const rawSignals = await Promise.all(roles.map(async (role, index) => {
     const signalId = `${role.process}-${index + 1}`;
     const result = await runWorker(
       `${input.jobId}-${role.process}`,
@@ -74,18 +79,20 @@ export async function runDream(input: {
       'Always apply your lens. Do not discuss whether it is applicable and do not retreat to a literal reading. Every natural-language string in the JSON must use only the language of the USER REQUEST. ' +
       'Do not leave English analytical terms in a non-English response; translate even framework names where the language has an established form. Avoid formulaic openings equivalent to "perhaps", "it seems", or "possibly"; use at most one uncertainty marker only when genuinely needed. ' +
       'Use the supplied CHARACTER FRAGMENT as an associative point of view, not as factual evidence about the user. The optional PRIOR DREAM FRAGMENT is a local reminder of what this experience has already said: develop it, challenge it, or leave it behind; never merely repeat it. ' +
-      'Write signal as one short inner sentence. proposedShift is the one concrete image or distinction the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty.\n\n' +
+      'Write signal as one short inner sentence. proposedShift is the one concrete image or distinction the candidate preserves. confidence measures how alive and useful the association feels, not factual certainty. Copy grounding from CURATED CONTEXT. memoryAnchor names the concrete supplied detail in max 12 words; use an empty string when grounding is character_only. Never imply a memory source that was not supplied.\n\n' +
       'Return ONLY valid JSON with this exact shape:\n' +
-      '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
-      `Do not answer the user directly and do not reveal chain-of-thought.\n\nCHARACTER FRAGMENT:\n${soulFragments[index]}\n\nPRIOR DREAM FRAGMENT:\n${memoryFragments[index]}\n\nUSER REQUEST:\n${input.prompt}`,
+      '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0,"grounding":"memory|current_request|character_only","memoryAnchor":"max 12 words or empty"}\n\n' +
+      `Do not answer the user directly and do not reveal chain-of-thought.\n\nCHARACTER FRAGMENT:\n${soulFragments[index]}\n\nCURATED CONTEXT:\n${JSON.stringify(curatedContexts[role.process])}\n\nUSER REQUEST:\n${input.prompt}`,
       role.profile ?? 'core',
     );
     const parsed = parseJson(result) as Omit<DreamSignal, 'process' | 'signalId'>;
     const signal: DreamSignal = { process: role.process, signalId, ...parsed };
     validateSignal(signal);
-    await input.onSignal(signal, index + 1);
+    if (signal.grounding !== curatedContexts[role.process].grounding) throw new Error(`grounding_mismatch:${role.process}`);
     return signal;
   }));
+  const signals = await editSignals(input.prompt, rawSignals);
+  await Promise.all(signals.map((signal, index) => input.onSignal(signal, index + 1)));
 
   const synthesis = parseJson(await runWorker(
     `${input.jobId}-synthesis`,
@@ -105,13 +112,62 @@ export async function runDream(input: {
   return synthesis;
 }
 
+async function curateContexts(
+  prompt: string,
+  dreamMemory: Array<{ alreadySaid: string; motifs: string[] }>,
+  conversationMemory: string[],
+): Promise<Record<DreamSignal['process'], { grounding: Grounding; fragments: string[]; rationale: string }>> {
+  const candidates = [
+    ...dreamMemory.flatMap((item) => [item.alreadySaid, ...item.motifs]).filter(Boolean).map((text, index) => ({ id: `dream-${index + 1}`, source: 'memory', text })),
+    ...conversationMemory.filter(Boolean).map((text, index) => ({ id: `conversation-${index + 1}`, source: 'memory', text })),
+  ];
+  const roleNames = roles.map((role) => role.process);
+  const result = parseJson(await runWorker(
+    `context-curator-${Date.now()}`,
+    'Route evidence to six imaginative lenses. Choose zero to two supplied memory fragments for each role. Prefer precise relevance over equal distribution; the same fragment may serve multiple roles. If no fragment honestly supports a role, use current_request when the user request supplies a concrete basis, otherwise character_only. Never invent or paraphrase a missing memory. Return short source fragments verbatim enough to audit.\n\n' +
+    'Role needs: unease—risk of misunderstanding; warmth—shared rhythm or characteristic thorn; loss—change over time; echo—rare concrete sensory object; longing—tension between agent limitation and this relationship; envy—human body, place, weather, rest, friendship, journey, risk, or physical experience.\n\n' +
+    `Return ONLY JSON: {"assignments":{${roleNames.map((name) => `"${name}":{"grounding":"memory|current_request|character_only","fragmentIds":["id"],"rationale":"max 12 words"}`).join(',')}}}\n\n` +
+    `USER REQUEST:\n${prompt}\n\nMEMORY CANDIDATES:\n${JSON.stringify(candidates, null, 2)}`,
+    'core',
+  )) as { assignments?: Record<string, { grounding?: Grounding; fragmentIds?: string[]; rationale?: string }> };
+  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate.text]));
+  return Object.fromEntries(roleNames.map((name) => {
+    const assignment = result.assignments?.[name];
+    const grounding = assignment?.grounding;
+    if (!grounding || !['memory', 'current_request', 'character_only'].includes(grounding)) throw new Error(`invalid_context_grounding:${name}`);
+    const fragments = (assignment.fragmentIds ?? []).map((id) => byId.get(id)).filter((value): value is string => Boolean(value)).slice(0, 2);
+    if (grounding === 'memory' && !fragments.length) throw new Error(`missing_context_memory:${name}`);
+    return [name, { grounding, fragments, rationale: assignment.rationale?.slice(0, 120) ?? '' }];
+  })) as Record<DreamSignal['process'], { grounding: Grounding; fragments: string[]; rationale: string }>;
+}
+
+async function editSignals(prompt: string, rawSignals: DreamSignal[]): Promise<DreamSignal[]> {
+  const result = parseJson(await runWorker(
+    `signal-editor-${Date.now()}`,
+    'Edit six short Dream signals before they are shown. Preserve each signalId, process, grounding, memoryAnchor, factual basis, and intended insight. Tighten language; remove syrup, generic profundity, flattery, repeated images, repeated conclusions, and AI-literary clichés. Make every card distinct. Keep first-person voice only where the source signal uses it. Do not add facts, diagnoses, claims of consciousness, or new memories. For echo, remove sea/fog/window/train/mirror/lighthouse/door/bridge/shadow/stars unless grounded in memoryAnchor or the current request. Return every signal exactly once.\n\n' +
+    'Return ONLY JSON: {"signals":[{"process":"existing","signalId":"existing","signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0,"grounding":"memory|current_request|character_only","memoryAnchor":"max 12 words or empty"}]}\n\n' +
+    `USER REQUEST:\n${prompt}\n\nRAW SIGNALS:\n${JSON.stringify(rawSignals, null, 2)}`,
+    'editor',
+  )) as { signals?: DreamSignal[] };
+  if (!Array.isArray(result.signals) || result.signals.length !== rawSignals.length) throw new Error('invalid_edited_signals');
+  const editedById = new Map(result.signals.map((signal) => [signal.signalId, signal]));
+  return rawSignals.map((raw) => {
+    const edited = editedById.get(raw.signalId);
+    if (!edited || edited.process !== raw.process || edited.grounding !== raw.grounding || edited.memoryAnchor !== raw.memoryAnchor) {
+      throw new Error(`invalid_edited_signal:${raw.signalId}`);
+    }
+    validateSignal(edited);
+    return edited;
+  });
+}
+
 async function runWorker(session: string, prompt: string, profile: DreamProfile = 'core'): Promise<string> {
   const model = profile === 'final' ? await finalModel() : await dreamModel(profile);
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
     '--model', model,
-    '--thinking', 'medium',
-    '--timeout', '180', '--json', '--message', prompt,
+    '--thinking', profile === 'editor' ? 'minimal' : 'medium',
+    '--timeout', profile === 'editor' ? '90' : '180', '--json', '--message', prompt,
   ], { maxBuffer: 4 * 1024 * 1024 });
   const envelope = JSON.parse(stdout) as { result?: { payloads?: Array<{ text?: string }> } };
   const text = envelope.result?.payloads?.find((payload) => payload.text)?.text;
@@ -139,6 +195,10 @@ async function resolveFinalModel(): Promise<string> {
 }
 
 async function dreamModel(profile: Exclude<DreamProfile, 'final'>): Promise<string> {
+  if (profile === 'editor') {
+    resolvedEditorModel ??= resolveDreamModel('editor');
+    return resolvedEditorModel;
+  }
   if (profile === 'expressive') {
     resolvedExpressiveModel ??= resolveDreamModel('expressive');
     return resolvedExpressiveModel;
@@ -148,7 +208,9 @@ async function dreamModel(profile: Exclude<DreamProfile, 'final'>): Promise<stri
 }
 
 async function resolveDreamModel(profile: Exclude<DreamProfile, 'final'>): Promise<string> {
-  const override = (profile === 'expressive' ? process.env.BMA_DREAM_EXPRESSIVE_MODEL : process.env.BMA_DREAM_MODEL)?.trim();
+  const override = (profile === 'expressive'
+    ? process.env.BMA_DREAM_EXPRESSIVE_MODEL
+    : profile === 'editor' ? process.env.BMA_DREAM_EDITOR_MODEL : process.env.BMA_DREAM_MODEL)?.trim();
   if (override) {
     process.stdout.write(`Dream ${profile} model: ${override} (environment override)\n`);
     return override;
@@ -158,7 +220,7 @@ async function resolveDreamModel(profile: Exclude<DreamProfile, 'final'>): Promi
   const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
   const allowed = new Set(status.allowed ?? []);
 
-  const preferred = profile === 'expressive' ? preferredExpressiveModels : preferredCoreModels;
+  const preferred = profile === 'expressive' ? preferredExpressiveModels : profile === 'editor' ? preferredEditorModels : preferredCoreModels;
   for (const model of preferred) {
     if (allowed.has(model) && await probeModel(model)) {
       process.stdout.write(`Dream ${profile} model: ${model} (quality route)\n`);
@@ -193,6 +255,9 @@ function validateSignal(signal: DreamSignal): void {
   if (!signal.signal || signal.signal.length > 800) throw new Error(`invalid_signal:${signal.process}`);
   if (!signal.proposedShift || signal.proposedShift.length > 500) throw new Error(`invalid_shift:${signal.process}`);
   if (typeof signal.confidence !== 'number' || signal.confidence < 0 || signal.confidence > 1) throw new Error(`invalid_confidence:${signal.process}`);
+  if (!['memory', 'current_request', 'character_only'].includes(signal.grounding)) throw new Error(`invalid_grounding:${signal.process}`);
+  if (typeof signal.memoryAnchor !== 'string' || signal.memoryAnchor.length > 240) throw new Error(`invalid_memory_anchor:${signal.process}`);
+  if (signal.grounding === 'character_only' && signal.memoryAnchor) throw new Error(`unexpected_memory_anchor:${signal.process}`);
 }
 
 function loadSoul(): string {
@@ -212,12 +277,6 @@ function splitReference(reference: string, count: number): string[] {
     const selected = chunks.filter((_, chunkIndex) => chunkIndex % count === index).join('\n\n');
     return (selected || chunks[index % chunks.length]!).slice(0, 2_400);
   });
-}
-
-function distributeMemory(memory: Array<{ alreadySaid: string; motifs: string[] }>, conversation: string[], count: number): string[] {
-  const fragments = [...memory.flatMap((item) => [item.alreadySaid, ...item.motifs]), ...conversation].filter(Boolean);
-  if (!fragments.length) return Array.from({ length: count }, () => '(memory not used for this dream)');
-  return Array.from({ length: count }, (_, index) => fragments[index % fragments.length] ?? '(no distinct fragment)');
 }
 
 function validateSynthesis(
