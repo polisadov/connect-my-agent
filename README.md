@@ -37,8 +37,8 @@ npx connect-my-agent run
 
 The current v0 expects a restricted local OpenClaw agent named `dream-worker`. It runs six fast bounded processes — Unease, Warmth, Loss, Echo, Longing, and Envy — in parallel, emitting short signals rather than raw chain-of-thought. Longing imagines one specific agent-side wish shaped by the relationship; Envy notices one concrete human experience with affectionate distance. Both are explicitly poetic counterfactuals, not claims of consciousness. Each process receives a different fragment of `SOUL.md`. A stronger final model answers the request using at most two signals and one image. If the user enables Dream memory for a run, the connector retrieves compact local reminders of what prior Dreams already said so the answer can advance rather than repeat them.
 
-Model routing is local and provider-agnostic. The connector honors `BMA_DREAM_MODEL` first; otherwise it prefers a working `anthropic/claude-haiku-4-5`, falls back to `openai/gpt-5.4-mini`, and finally uses the configured `dream-worker` default. Anthropic is probed once because configured credentials do not always imply organization-level model access.
-The final answer uses `BMA_DREAM_SYNTHESIS_MODEL` when set, otherwise the configured `dream-worker` default model.
+Model routing is local and provider-agnostic. The connector honors `BMA_DREAM_MODEL` first; otherwise it prefers `openai/gpt-5.6-sol`, then `openai/gpt-5.5`, then `openai/gpt-5.4-mini`, and finally uses the configured `dream-worker` default. Every Dream process runs with medium reasoning effort; the current product phase optimizes for a memorable result rather than minimum inference cost.
+The final answer uses `BMA_DREAM_SYNTHESIS_MODEL` when set, otherwise the same quality-first route.
 
 Override conversation-memory sources with `BMA_CONVERSATION_MEMORY_PATHS`, separated by the platform path delimiter.
 

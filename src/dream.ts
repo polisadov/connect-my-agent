@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const preferredFastModels = ['anthropic/claude-haiku-4-5', 'openai/gpt-5.4-mini'] as const;
+const preferredDreamModels = ['openai/gpt-5.6-sol', 'openai/gpt-5.5', 'openai/gpt-5.4-mini'] as const;
 let resolvedModel: Promise<string> | undefined;
 let resolvedFinalModel: Promise<string> | undefined;
 
@@ -102,8 +102,8 @@ async function runWorker(session: string, prompt: string, profile: 'fast' | 'fin
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
     '--model', model,
-    '--thinking', profile === 'fast' ? 'minimal' : 'medium',
-    '--timeout', profile === 'fast' ? '90' : '180', '--json', '--message', prompt,
+    '--thinking', 'medium',
+    '--timeout', '180', '--json', '--message', prompt,
   ], { maxBuffer: 4 * 1024 * 1024 });
   const envelope = JSON.parse(stdout) as { result?: { payloads?: Array<{ text?: string }> } };
   const text = envelope.result?.payloads?.find((payload) => payload.text)?.text;
@@ -123,10 +123,11 @@ async function resolveFinalModel(): Promise<string> {
     return override;
   }
   const { stdout } = await execFileAsync('openclaw', ['models', '--agent', 'dream-worker', 'status', '--json']);
-  const status = JSON.parse(stdout) as { resolvedDefault?: string };
-  if (!status.resolvedDefault) throw new Error('No final Dream model configured in OpenClaw');
-  process.stdout.write(`Dream final model: ${status.resolvedDefault} (agent default)\n`);
-  return status.resolvedDefault;
+  const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
+  const model = preferredDreamModels.find((candidate) => status.allowed?.includes(candidate)) ?? status.resolvedDefault;
+  if (!model) throw new Error('No final Dream model configured in OpenClaw');
+  process.stdout.write(`Dream final model: ${model} (quality route)\n`);
+  return model;
 }
 
 async function dreamModel(): Promise<string> {
@@ -145,13 +146,11 @@ async function resolveDreamModel(): Promise<string> {
   const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
   const allowed = new Set(status.allowed ?? []);
 
-  if (allowed.has(preferredFastModels[0]) && await probeModel(preferredFastModels[0])) {
-    process.stdout.write(`Dream model: ${preferredFastModels[0]} (fast Anthropic route)\n`);
-    return preferredFastModels[0];
-  }
-  if (allowed.has(preferredFastModels[1])) {
-    process.stdout.write(`Dream model: ${preferredFastModels[1]} (fast OpenAI route)\n`);
-    return preferredFastModels[1];
+  for (const model of preferredDreamModels) {
+    if (allowed.has(model) && await probeModel(model)) {
+      process.stdout.write(`Dream model: ${model} (quality route)\n`);
+      return model;
+    }
   }
   if (status.resolvedDefault) {
     process.stdout.write(`Dream model: ${status.resolvedDefault} (agent default)\n`);
@@ -164,7 +163,7 @@ async function probeModel(model: string): Promise<boolean> {
   try {
     await execFileAsync('openclaw', [
       'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:model-probe-${Date.now()}`,
-      '--model', model, '--thinking', 'minimal', '--timeout', '30', '--json', '--message',
+      '--model', model, '--thinking', 'medium', '--timeout', '60', '--json', '--message',
       'Return only valid JSON: {"ok":true}',
     ], { maxBuffer: 1024 * 1024 });
     return true;
