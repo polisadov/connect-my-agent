@@ -116,20 +116,7 @@ async function runOnce(): Promise<void> {
   const job = await claimNextJob();
   if (!job) return void process.stdout.write('No pending Dream job.\n');
   process.stdout.write(`Running Dream job ${job.id}\n`);
-  const synthesis = await runDream({
-    jobId: job.id,
-    prompt: job.prompt,
-    memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
-    conversationContext: job.useConversationMemory && config.permissions?.includes('conversation-memory-read') ? recallConversationMemory(job.prompt) : [],
-    onSignal: async (signal, sequence) => {
-      await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
-      process.stdout.write(`Process ready: ${signal.process}\n`);
-    },
-  });
-  if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
-  const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
-  await postEvent(config, job.id, 7, 'synthesis', 'final', JSON.stringify(publicSynthesis));
-  process.stdout.write(`Dream job complete: ${job.id}\n`);
+  await processJob(config, job);
 }
 
 async function runForever(): Promise<void> {
@@ -150,28 +137,38 @@ async function runNextJob(): Promise<boolean> {
   const job = await claimNextJob();
   if (!job) return false;
   process.stdout.write(`Running Dream job ${job.id}\n`);
-  const synthesis = await runDream({
-    jobId: job.id,
-    prompt: job.prompt,
-    memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
-    conversationContext: job.useConversationMemory && config.permissions?.includes('conversation-memory-read') ? recallConversationMemory(job.prompt) : [],
-    onSignal: async (signal, sequence) => {
-      await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
-      process.stdout.write(`Process ready: ${signal.process}\n`);
-    },
-  });
-  if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
-  const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
-  await postEvent(config, job.id, 7, 'synthesis', 'final', JSON.stringify(publicSynthesis));
-  process.stdout.write(`Dream job complete: ${job.id}\n`);
+  await processJob(config, job);
   return true;
+}
+
+async function processJob(config: Config, job: { id: string; prompt: string; useDreamMemory?: boolean; useConversationMemory?: boolean }): Promise<void> {
+  try {
+    const synthesis = await runDream({
+      jobId: job.id,
+      prompt: job.prompt,
+      memoryContext: job.useDreamMemory ? recallDreamMemory(job.prompt) : [],
+      conversationContext: job.useConversationMemory && config.permissions?.includes('conversation-memory-read') ? recallConversationMemory(job.prompt) : [],
+      onSignal: async (signal, sequence) => {
+        await postEvent(config, job.id, sequence, signal.process, 'process', JSON.stringify(signal));
+        process.stdout.write(`Process ready: ${signal.process}\n`);
+      },
+    });
+    if (job.useDreamMemory) rememberDream(job.prompt, synthesis.localMemory);
+    const { localMemory: _localMemory, ...publicSynthesis } = synthesis;
+    await postEvent(config, job.id, 7, 'synthesis', 'final', JSON.stringify(publicSynthesis));
+    process.stdout.write(`Dream job complete: ${job.id}\n`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await postEvent(config, job.id, 7, 'system', 'error', JSON.stringify({ error: 'Dream generation stopped.', detail: message }));
+    throw error;
+  }
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function postEvent(config: Config, jobId: string, sequence: number, stream: DreamSignal['process'] | 'synthesis', type: 'process' | 'final', text: string): Promise<void> {
+async function postEvent(config: Config, jobId: string, sequence: number, stream: DreamSignal['process'] | 'synthesis' | 'system', type: 'process' | 'final' | 'error', text: string): Promise<void> {
   const requestPath = `/api/jobs/${jobId}/events`;
   const body = JSON.stringify({ sequence, stream, type, text });
   const response = await signedFetch(config, requestPath, 'POST', body);
