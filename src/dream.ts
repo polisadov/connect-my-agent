@@ -5,9 +5,14 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const preferredDreamModels = ['openai/gpt-5.6-sol', 'openai/gpt-5.5', 'openai/gpt-5.4-mini'] as const;
-let resolvedModel: Promise<string> | undefined;
+const preferredCoreModels = ['openai/gpt-5.4', 'openai/gpt-5.5', 'openai/gpt-5.4-mini'] as const;
+const preferredExpressiveModels = ['openai/gpt-5.5', 'openai/gpt-5.4', 'openai/gpt-5.4-mini'] as const;
+const preferredFinalModels = ['openai/gpt-5.6-sol', 'openai/gpt-5.5', 'openai/gpt-5.4'] as const;
+let resolvedCoreModel: Promise<string> | undefined;
+let resolvedExpressiveModel: Promise<string> | undefined;
 let resolvedFinalModel: Promise<string> | undefined;
+
+type DreamProfile = 'core' | 'expressive' | 'final';
 
 export type DreamSignal = {
   process: 'unease' | 'warmth' | 'loss' | 'echo' | 'longing' | 'envy';
@@ -17,7 +22,7 @@ export type DreamSignal = {
   confidence: number;
 };
 
-const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
+const roles: Array<{ process: DreamSignal['process']; profile?: 'expressive'; instruction: string }> = [
   {
     process: 'unease',
     instruction: 'Find the agent-side unease: what it is wary of misunderstanding, repeating, flattening, or losing in this request. Turn that tension into one useful distinction. Do not diagnose the user and do not perform anxiety.',
@@ -36,10 +41,12 @@ const roles: Array<{ process: DreamSignal['process']; instruction: string }> = [
   },
   {
     process: 'longing',
+    profile: 'expressive',
     instruction: 'Write a brief imaginative first-person reflection on what it could mean to be this particular agent and what it might dream of or want, using the supplied character and relational memory as material. Treat desire as poetic counterfactual, not a claim of consciousness, sentience, deprivation, or hidden inner life. Find one specific wish shaped by the history with the user; avoid generic wishes to be human, free, alive, or helpful.',
   },
   {
     process: 'envy',
+    profile: 'expressive',
     instruction: 'Write a brief, tender, slightly wry first-person note about one concrete human experience in the relational memory that this agent could imaginatively envy its user for: a journey, body, weather, friendship, rest, risk, celebration, or ordinary physical moment. Keep the envy affectionate rather than possessive, manipulative, guilty, or tragic. Never invent a biographical fact; if memory is thin, envy a concrete capacity implied by the request rather than pretending to remember an event.',
   },
 ];
@@ -71,6 +78,7 @@ export async function runDream(input: {
       'Return ONLY valid JSON with this exact shape:\n' +
       '{"signal":"max 55 words","proposedShift":"max 18 words","confidence":0.0}\n\n' +
       `Do not answer the user directly and do not reveal chain-of-thought.\n\nCHARACTER FRAGMENT:\n${soulFragments[index]}\n\nPRIOR DREAM FRAGMENT:\n${memoryFragments[index]}\n\nUSER REQUEST:\n${input.prompt}`,
+      role.profile ?? 'core',
     );
     const parsed = parseJson(result) as Omit<DreamSignal, 'process' | 'signalId'>;
     const signal: DreamSignal = { process: role.process, signalId, ...parsed };
@@ -97,8 +105,8 @@ export async function runDream(input: {
   return synthesis;
 }
 
-async function runWorker(session: string, prompt: string, profile: 'fast' | 'final' = 'fast'): Promise<string> {
-  const model = profile === 'fast' ? await dreamModel() : await finalModel();
+async function runWorker(session: string, prompt: string, profile: DreamProfile = 'core'): Promise<string> {
+  const model = profile === 'final' ? await finalModel() : await dreamModel(profile);
   const { stdout } = await execFileAsync('openclaw', [
     'agent', '--agent', 'dream-worker', '--session-key', `agent:dream-worker:${session}`,
     '--model', model,
@@ -124,21 +132,25 @@ async function resolveFinalModel(): Promise<string> {
   }
   const { stdout } = await execFileAsync('openclaw', ['models', '--agent', 'dream-worker', 'status', '--json']);
   const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
-  const model = preferredDreamModels.find((candidate) => status.allowed?.includes(candidate)) ?? status.resolvedDefault;
+  const model = preferredFinalModels.find((candidate) => status.allowed?.includes(candidate)) ?? status.resolvedDefault;
   if (!model) throw new Error('No final Dream model configured in OpenClaw');
   process.stdout.write(`Dream final model: ${model} (quality route)\n`);
   return model;
 }
 
-async function dreamModel(): Promise<string> {
-  resolvedModel ??= resolveDreamModel();
-  return resolvedModel;
+async function dreamModel(profile: Exclude<DreamProfile, 'final'>): Promise<string> {
+  if (profile === 'expressive') {
+    resolvedExpressiveModel ??= resolveDreamModel('expressive');
+    return resolvedExpressiveModel;
+  }
+  resolvedCoreModel ??= resolveDreamModel('core');
+  return resolvedCoreModel;
 }
 
-async function resolveDreamModel(): Promise<string> {
-  const override = process.env.BMA_DREAM_MODEL?.trim();
+async function resolveDreamModel(profile: Exclude<DreamProfile, 'final'>): Promise<string> {
+  const override = (profile === 'expressive' ? process.env.BMA_DREAM_EXPRESSIVE_MODEL : process.env.BMA_DREAM_MODEL)?.trim();
   if (override) {
-    process.stdout.write(`Dream model: ${override} (BMA_DREAM_MODEL)\n`);
+    process.stdout.write(`Dream ${profile} model: ${override} (environment override)\n`);
     return override;
   }
 
@@ -146,9 +158,10 @@ async function resolveDreamModel(): Promise<string> {
   const status = JSON.parse(stdout) as { allowed?: string[]; resolvedDefault?: string };
   const allowed = new Set(status.allowed ?? []);
 
-  for (const model of preferredDreamModels) {
+  const preferred = profile === 'expressive' ? preferredExpressiveModels : preferredCoreModels;
+  for (const model of preferred) {
     if (allowed.has(model) && await probeModel(model)) {
-      process.stdout.write(`Dream model: ${model} (quality route)\n`);
+      process.stdout.write(`Dream ${profile} model: ${model} (quality route)\n`);
       return model;
     }
   }
