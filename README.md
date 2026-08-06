@@ -39,6 +39,8 @@ The current v0 expects a restricted local OpenClaw agent named `dream-worker`. I
 
 Model routing is local and provider-agnostic. A GPT-5.4 context curator first routes the most relevant memory evidence to each lens. The four core processes prefer `openai/gpt-5.4`; Longing and Envy prefer `openai/gpt-5.5`; a lightweight GPT-5.4-mini editor removes repetition and literary syrup before display; final synthesis prefers `openai/gpt-5.6-sol`. Reasoning is medium except for the mechanical editor. Override the tiers independently with `BMA_DREAM_MODEL`, `BMA_DREAM_EXPRESSIVE_MODEL`, `BMA_DREAM_EDITOR_MODEL`, and `BMA_DREAM_SYNTHESIS_MODEL`.
 
+Dream changes are evaluated against a stable ten-request regression corpus in `evals/dream/`. The first comparison week is report-only: blind `current`/`candidate` review covers liveliness, specificity, non-sycophancy, privacy/creepiness, and usefulness, with latency, failures, and model calls reported separately.
+
 Override conversation-memory sources with `BMA_CONVERSATION_MEMORY_PATHS`, separated by the platform path delimiter.
 
 ## Development
